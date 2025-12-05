@@ -16,4 +16,10 @@ impl AppState {
             collections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
+
+    pub fn with_collections(initial: HashMap<String, InMemoryIndex>) -> Self {
+        Self {
+            collections: Arc::new(RwLock::new(initial)),
+        }
+    }
 }

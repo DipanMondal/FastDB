@@ -9,6 +9,7 @@ mod routes;
 mod state;
 mod index;
 mod models;
+mod storage;
 
 use crate::state::AppState;
 
@@ -16,7 +17,10 @@ use crate::state::AppState;
 async fn main() -> anyhow::Result<()> {
     init_tracing();
 
-    let app_state = AppState::new();
+    // Load previous state from WAL
+    let collections = storage::load_collections_from_wal().unwrap_or_default();
+    tracing::info!("loaded {} collections from WAL", collections.len());
+    let app_state = AppState::with_collections(collections);
 
     let app = Router::new()
         .route("/health", get(routes::health))

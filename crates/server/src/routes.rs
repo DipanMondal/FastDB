@@ -11,7 +11,9 @@ use crate::models::{
     ListCollectionsResponse, QueryMatch, QueryRequest, QueryResponse, UpsertRequest,
     UpsertResponse,
 };
+
 use crate::state::AppState;
+use crate::storage::{append_entry, WalEntry};
 
 
 // ---------- health ----------
@@ -42,13 +44,20 @@ pub async fn create_collection(
         ));
     }
 
-    collections.insert(payload.name.clone(), InMemoryIndex::new(payload.dimension));
+    let name = payload.name.clone();
+    let dimension = payload.dimension;
 
-    Ok(Json(CreateCollectionResponse {
-        name: payload.name,
-        dimension: payload.dimension,
-    }))
+    collections.insert(name.clone(), InMemoryIndex::new(dimension));
+
+    if let Err(e) =
+        append_entry(&WalEntry::CreateCollection { name: name.clone(), dimension })
+    {
+        tracing::error!("failed to append WAL for create_collection: {:?}", e);
+    }
+
+    Ok(Json(CreateCollectionResponse { name, dimension }))
 }
+
 
 pub async fn list_collections(
     State(state): State<AppState>,
@@ -101,8 +110,13 @@ pub async fn delete_collection(
         ));
     }
 
+    if let Err(e) = append_entry(&WalEntry::DeleteCollection { name: name.clone() }) {
+        tracing::error!("failed to append WAL for delete_collection: {:?}", e);
+    }
+
     Ok(Json(DeleteCollectionResponse { deleted: true }))
 }
+
 
 // ---------- upsert ----------
 
@@ -122,10 +136,23 @@ pub async fn upsert_vectors(
 
     let mut count = 0usize;
     for v in payload.vectors {
+        let id = v.id;
+        let values = v.values;
+        let metadata = v.metadata;
+
         index
-            .upsert(v.id, v.values, v.metadata)
+            .upsert(id.clone(), values.clone(), metadata.clone())
             .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         count += 1;
+
+        if let Err(e) = append_entry(&WalEntry::UpsertVector {
+            collection: name.clone(),
+            id,
+            values,
+            metadata,
+        }) {
+            tracing::error!("failed to append WAL for upsert_vector: {:?}", e);
+        }
     }
 
     Ok(Json(UpsertResponse { upserted: count }))
@@ -180,5 +207,15 @@ pub async fn delete_vector(
 
     let deleted = index.delete(&id);
 
+    if deleted {
+        if let Err(e) = append_entry(&WalEntry::DeleteVector {
+            collection: name.clone(),
+            id: id.clone(),
+        }) {
+            tracing::error!("failed to append WAL for delete_vector: {:?}", e);
+        }
+    }
+
     Ok(Json(DeleteVectorResponse { deleted }))
 }
+
