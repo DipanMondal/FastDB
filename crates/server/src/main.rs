@@ -33,6 +33,10 @@ async fn main() -> anyhow::Result<()> {
             "/collections/:name",
             get(routes::get_collection).delete(routes::delete_collection),
         )
+		.route(
+			"/collections/:name/stats",
+			get(routes::collection_stats),
+		)
         .route(
             "/collections/:name/vectors/upsert",
             post(routes::upsert_vectors),

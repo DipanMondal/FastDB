@@ -10,7 +10,7 @@ use crate::models::{
     CollectionSummary, CreateCollectionRequest, CreateCollectionResponse,
     DeleteCollectionResponse, DeleteVectorResponse, GetCollectionResponse, HealthResponse,
     ListCollectionsResponse, QueryMatch, QueryRequest, QueryResponse, UpsertRequest,
-    UpsertResponse,
+    UpsertResponse,CollectionStatsResponse,
 };
 
 use crate::state::AppState;
@@ -121,6 +121,39 @@ pub async fn get_collection(
         )),
     }
 }
+
+pub async fn collection_stats(
+    State(state): State<AppState>,
+    api_key: ApiKey,
+    Path(name): Path<String>,
+) -> Result<Json<CollectionStatsResponse>, (StatusCode, String)> {
+    let tenant = api_key.0;
+    let collections = state.collections.read().await;
+
+    let tenant_map = collections.get(&tenant).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("collection '{}' not found", name),
+        )
+    })?;
+
+    let index = tenant_map.get(&name).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("collection '{}' not found", name),
+        )
+    })?;
+
+    let resp = CollectionStatsResponse {
+        name,
+        dimension: index.dimension(),
+        vectors: index.vector_count(),
+        index_type: "hnsw_cosine".to_string(),
+    };
+
+    Ok(Json(resp))
+}
+
 
 
 pub async fn delete_collection(

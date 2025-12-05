@@ -80,6 +80,16 @@ pub struct GetCollectionResponse {
     pub vectors: usize,
 }
 
+// ---------- collections: stats ----------
+
+#[derive(Serialize)]
+pub struct CollectionStatsResponse {
+    pub name: String,
+    pub dimension: usize,
+    pub vectors: usize,
+    pub index_type: String,
+}
+
 // ---------- delete responses ----------
 
 #[derive(Serialize)]
