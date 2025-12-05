@@ -13,3 +13,4 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
+hnsw_rs = { workspace = true }
