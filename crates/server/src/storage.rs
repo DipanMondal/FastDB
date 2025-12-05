@@ -15,15 +15,24 @@ pub const WAL_FILE: &str = "data/wal.jsonl";
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WalEntry {
-    CreateCollection { name: String, dimension: usize },
-    DeleteCollection { name: String },
+    CreateCollection {
+        tenant: String,
+        name: String,
+        dimension: usize,
+    },
+    DeleteCollection {
+        tenant: String,
+        name: String,
+    },
     UpsertVector {
+        tenant: String,
         collection: String,
         id: String,
         values: Vec<f32>,
         metadata: Option<Value>,
     },
     DeleteVector {
+        tenant: String,
         collection: String,
         id: String,
     },
@@ -54,11 +63,13 @@ pub fn append_entry(entry: &WalEntry) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn load_collections_from_wal() -> anyhow::Result<HashMap<String, InMemoryIndex>> {
+// tenant -> { collection_name -> index }
+pub fn load_collections_from_wal(
+) -> anyhow::Result<HashMap<String, HashMap<String, InMemoryIndex>>> {
     ensure_data_dir()?;
 
     let path = Path::new(WAL_FILE);
-    let mut collections: HashMap<String, InMemoryIndex> = HashMap::new();
+    let mut collections: HashMap<String, HashMap<String, InMemoryIndex>> = HashMap::new();
 
     if !path.exists() {
         return Ok(collections);
@@ -84,35 +95,61 @@ pub fn load_collections_from_wal() -> anyhow::Result<HashMap<String, InMemoryInd
         let entry: WalEntry = match serde_json::from_str(trimmed) {
             Ok(e) => e,
             Err(e) => {
-                eprintln!("failed to parse WAL line {}: {:?} (line: {})", lineno + 1, e, trimmed);
+                eprintln!(
+                    "failed to parse WAL line {}: {:?} (line: {})",
+                    lineno + 1,
+                    e,
+                    trimmed
+                );
                 continue;
             }
         };
 
         match entry {
-            WalEntry::CreateCollection { name, dimension } => {
-                collections
+            WalEntry::CreateCollection {
+                tenant,
+                name,
+                dimension,
+            } => {
+                let tenant_map = collections.entry(tenant).or_insert_with(HashMap::new);
+                tenant_map
                     .entry(name)
                     .or_insert_with(|| InMemoryIndex::new(dimension));
             }
-            WalEntry::DeleteCollection { name } => {
-                collections.remove(&name);
+            WalEntry::DeleteCollection { tenant, name } => {
+                if let Some(tenant_map) = collections.get_mut(&tenant) {
+                    tenant_map.remove(&name);
+                    if tenant_map.is_empty() {
+                        collections.remove(&tenant);
+                    }
+                }
             }
             WalEntry::UpsertVector {
+                tenant,
                 collection,
                 id,
                 values,
                 metadata,
             } => {
                 let dim = values.len();
-                let index = collections
+                let tenant_map = collections.entry(tenant).or_insert_with(HashMap::new);
+                let index = tenant_map
                     .entry(collection)
                     .or_insert_with(|| InMemoryIndex::new(dim));
                 let _ = index.upsert(id, values, metadata);
             }
-            WalEntry::DeleteVector { collection, id } => {
-                if let Some(index) = collections.get_mut(&collection) {
-                    index.delete(&id);
+            WalEntry::DeleteVector {
+                tenant,
+                collection,
+                id,
+            } => {
+                if let Some(tenant_map) = collections.get_mut(&tenant) {
+                    if let Some(index) = tenant_map.get_mut(&collection) {
+                        index.delete(&id);
+                    }
+                    if tenant_map.is_empty() {
+                        collections.remove(&tenant);
+                    }
                 }
             }
         }
