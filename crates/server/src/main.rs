@@ -1,9 +1,14 @@
-use axum::{routing::get, Router};
+use axum::{
+    routing::{get, post, delete},
+    Router,
+};
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod routes;
 mod state;
+mod index;
+mod models;
 
 use crate::state::AppState;
 
@@ -15,6 +20,23 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(routes::health))
+        .route(
+            "/collections",
+            post(routes::create_collection).get(routes::list_collections),
+        )
+        .route(
+            "/collections/:name",
+            get(routes::get_collection).delete(routes::delete_collection),
+        )
+        .route(
+            "/collections/:name/vectors/upsert",
+            post(routes::upsert_vectors),
+        )
+        .route(
+            "/collections/:name/vectors/:id",
+            delete(routes::delete_vector),
+        )
+        .route("/collections/:name/query", post(routes::query_vectors))
         .with_state(app_state);
 
     let addr = "127.0.0.1:8080";
