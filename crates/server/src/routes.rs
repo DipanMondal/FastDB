@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 
+use crate::auth::ApiKey;
 use crate::index::InMemoryIndex;
 use crate::models::{
     CollectionSummary, CreateCollectionRequest, CreateCollectionResponse,
@@ -26,6 +27,7 @@ pub async fn health(State(_state): State<AppState>) -> Json<HealthResponse> {
 
 pub async fn create_collection(
     State(state): State<AppState>,
+    _api_key: ApiKey,
     Json(payload): Json<CreateCollectionRequest>,
 ) -> Result<Json<CreateCollectionResponse>, (StatusCode, String)> {
     if payload.dimension == 0 {
@@ -61,6 +63,7 @@ pub async fn create_collection(
 
 pub async fn list_collections(
     State(state): State<AppState>,
+    _api_key: ApiKey,
 ) -> Json<ListCollectionsResponse> {
     let collections = state.collections.read().await;
 
@@ -79,6 +82,7 @@ pub async fn list_collections(
 
 pub async fn get_collection(
     State(state): State<AppState>,
+    _api_key: ApiKey,
     Path(name): Path<String>,
 ) -> Result<Json<GetCollectionResponse>, (StatusCode, String)> {
     let collections = state.collections.read().await;
@@ -98,6 +102,7 @@ pub async fn get_collection(
 
 pub async fn delete_collection(
     State(state): State<AppState>,
+    _api_key: ApiKey,
     Path(name): Path<String>,
 ) -> Result<Json<DeleteCollectionResponse>, (StatusCode, String)> {
     let mut collections = state.collections.write().await;
@@ -122,6 +127,7 @@ pub async fn delete_collection(
 
 pub async fn upsert_vectors(
     State(state): State<AppState>,
+    _api_key: ApiKey,
     Path(name): Path<String>,
     Json(payload): Json<UpsertRequest>,
 ) -> Result<Json<UpsertResponse>, (StatusCode, String)> {
@@ -162,6 +168,7 @@ pub async fn upsert_vectors(
 
 pub async fn query_vectors(
     State(state): State<AppState>,
+	_api_key: ApiKey,
     Path(name): Path<String>,
     Json(payload): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, (StatusCode, String)> {
@@ -194,6 +201,7 @@ pub async fn query_vectors(
 
 pub async fn delete_vector(
     State(state): State<AppState>,
+	_api_key: ApiKey,
     Path((name, id)): Path<(String, String)>,
 ) -> Result<Json<DeleteVectorResponse>, (StatusCode, String)> {
     let mut collections = state.collections.write().await;

@@ -10,6 +10,7 @@ mod state;
 mod index;
 mod models;
 mod storage;
+mod auth;
 
 use crate::state::AppState;
 
