@@ -3,6 +3,25 @@ use std::collections::HashMap;
 
 use hnsw_rs::prelude::{DistCosine, Hnsw};
 
+/// Common interface for any vector index backend.
+pub trait VectorIndex {
+    fn dimension(&self) -> usize;
+
+    fn upsert(
+        &mut self,
+        id: String,
+        values: Vec<f32>,
+        metadata: Option<Value>,
+    ) -> Result<(), String>;
+
+    fn delete(&mut self, id: &str) -> bool;
+
+    fn query(&self, query: &[f32], top_k: usize) -> Result<Vec<ScoredPoint>, String>;
+
+    fn vector_count(&self) -> usize;
+}
+
+/// Current HNSW-backed implementation of the index.
 pub struct InMemoryIndex {
     dim: usize,
     // Ground-truth store for vectors + metadata
@@ -133,6 +152,7 @@ impl InMemoryIndex {
 
         // ef (search breadth) – can be tuned
         let ef = top_k.max(64);
+        // We oversample candidates, then truncate to top_k after filtering
         let neighbours = self.hnsw.search(query, top_k * 4, ef);
 
         let mut scored = Vec::new();
@@ -168,5 +188,33 @@ impl InMemoryIndex {
 
     pub fn vector_count(&self) -> usize {
         self.vectors.len()
+    }
+}
+
+/// Hook the HNSW index into the generic trait.
+impl VectorIndex for InMemoryIndex {
+    fn dimension(&self) -> usize {
+        self.dimension()
+    }
+
+    fn upsert(
+        &mut self,
+        id: String,
+        values: Vec<f32>,
+        metadata: Option<Value>,
+    ) -> Result<(), String> {
+        self.upsert(id, values, metadata)
+    }
+
+    fn delete(&mut self, id: &str) -> bool {
+        self.delete(id)
+    }
+
+    fn query(&self, query: &[f32], top_k: usize) -> Result<Vec<ScoredPoint>, String> {
+        self.query(query, top_k)
+    }
+
+    fn vector_count(&self) -> usize {
+        self.vector_count()
     }
 }
