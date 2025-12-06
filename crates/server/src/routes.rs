@@ -10,7 +10,7 @@ use crate::models::{
     CollectionSummary, CreateCollectionRequest, CreateCollectionResponse,
     DeleteCollectionResponse, DeleteVectorResponse, GetCollectionResponse, HealthResponse,
     ListCollectionsResponse, QueryMatch, QueryRequest, QueryResponse, UpsertRequest,
-    UpsertResponse,CollectionStatsResponse,
+    UpsertResponse,CollectionStatsResponse,SnapshotResponse,
 };
 
 use crate::state::AppState;
@@ -269,9 +269,19 @@ pub async fn query_vectors(
         )
     })?;
 
-    let scored = index
-        .query(&payload.vector, payload.top_k)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let scored = if let Some(filter_val) = payload.filter {
+        let filter_obj = filter_val.as_object().ok_or((
+            StatusCode::BAD_REQUEST,
+            "filter must be a JSON object".into(),
+        ))?;
+        index
+            .query_with_filter(&payload.vector, payload.top_k, filter_obj)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e))?
+    } else {
+        index
+            .query(&payload.vector, payload.top_k)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e))?
+    };
 
     let matches: Vec<QueryMatch> = scored
         .into_iter()
@@ -284,6 +294,7 @@ pub async fn query_vectors(
 
     Ok(Json(QueryResponse { matches }))
 }
+
 
 
 // ---------- delete vector ----------
@@ -325,4 +336,26 @@ pub async fn delete_vector(
     Ok(Json(DeleteVectorResponse { deleted }))
 }
 
+
+// -------------- Snapshot -------------
+
+pub async fn create_snapshot(
+    State(state): State<AppState>,
+    _api_key: ApiKey,
+) -> Result<Json<SnapshotResponse>, (StatusCode, String)> {
+    let collections = state.collections.read().await;
+
+    if let Err(e) = crate::storage::write_snapshot_from_state(&*collections) {
+        tracing::error!("failed to write snapshot: {:?}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to write snapshot".to_string(),
+        ));
+    }
+
+    Ok(Json(SnapshotResponse {
+        success: true,
+        message: "snapshot written".to_string(),
+    }))
+}
 

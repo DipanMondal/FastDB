@@ -1,27 +1,8 @@
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 
 use hnsw_rs::prelude::{DistCosine, Hnsw};
 
-/// Common interface for any vector index backend.
-pub trait VectorIndex {
-    fn dimension(&self) -> usize;
-
-    fn upsert(
-        &mut self,
-        id: String,
-        values: Vec<f32>,
-        metadata: Option<Value>,
-    ) -> Result<(), String>;
-
-    fn delete(&mut self, id: &str) -> bool;
-
-    fn query(&self, query: &[f32], top_k: usize) -> Result<Vec<ScoredPoint>, String>;
-
-    fn vector_count(&self) -> usize;
-}
-
-/// Current HNSW-backed implementation of the index.
 pub struct InMemoryIndex {
     dim: usize,
     // Ground-truth store for vectors + metadata
@@ -152,8 +133,9 @@ impl InMemoryIndex {
 
         // ef (search breadth) – can be tuned
         let ef = top_k.max(64);
-        // We oversample candidates, then truncate to top_k after filtering
-        let neighbours = self.hnsw.search(query, top_k * 4, ef);
+        // Slight oversampling
+        let knbn = top_k * 4;
+        let neighbours = self.hnsw.search(query, knbn, ef);
 
         let mut scored = Vec::new();
 
@@ -186,35 +168,99 @@ impl InMemoryIndex {
         Ok(scored)
     }
 
+    /// Query with an additional metadata filter.
+    ///
+    /// `filter` must be a JSON object; each key/value must exactly match the vector's metadata.
+    pub fn query_with_filter(
+        &self,
+        query: &[f32],
+        top_k: usize,
+        filter: &Map<String, Value>,
+    ) -> Result<Vec<ScoredPoint>, String> {
+        if query.len() != self.dim {
+            return Err(format!(
+                "expected query vector of dimension {}, got {}",
+                self.dim,
+                query.len()
+            ));
+        }
+
+        if top_k == 0 || self.vectors.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let qnorm_sq: f32 = query.iter().map(|x| x * x).sum();
+        if qnorm_sq == 0.0 {
+            return Err("query vector norm must be > 0".into());
+        }
+
+        // Oversample heavily because some candidates will be filtered out.
+        let knbn = (top_k * 8).max(top_k * 2);
+        let ef = knbn.max(64);
+
+        let neighbours = self.hnsw.search(query, knbn, ef);
+
+        let mut scored = Vec::new();
+
+        for n in neighbours {
+            let data_id = n.d_id;
+            let dist = n.distance;
+
+            let Some(external_id) = self.data_id_to_id.get(&data_id) else {
+                continue;
+            };
+            let Some(stored) = self.vectors.get(external_id) else {
+                continue;
+            };
+
+            if !metadata_matches_filter(&stored.metadata, filter) {
+                continue;
+            }
+
+            let score = 1.0 - dist;
+
+            scored.push(ScoredPoint {
+                id: external_id.clone(),
+                score,
+                metadata: stored.metadata.clone(),
+            });
+
+            if scored.len() == top_k {
+                break;
+            }
+        }
+
+        Ok(scored)
+    }
+
     pub fn vector_count(&self) -> usize {
         self.vectors.len()
     }
+
+    /// Export all vectors for snapshots: (id, values, metadata).
+    pub fn export_vectors(&self) -> Vec<(String, Vec<f32>, Option<Value>)> {
+        self.vectors
+            .iter()
+            .map(|(id, v)| (id.clone(), v.values.clone(), v.metadata.clone()))
+            .collect()
+    }
 }
 
-/// Hook the HNSW index into the generic trait.
-impl VectorIndex for InMemoryIndex {
-    fn dimension(&self) -> usize {
-        self.dimension()
+fn metadata_matches_filter(
+    metadata: &Option<Value>,
+    filter: &Map<String, Value>,
+) -> bool {
+    let meta_obj = match metadata {
+        Some(Value::Object(m)) => m,
+        _ => return false,
+    };
+
+    for (k, fv) in filter {
+        match meta_obj.get(k) {
+            Some(mv) if mv == fv => continue,
+            _ => return false,
+        }
     }
 
-    fn upsert(
-        &mut self,
-        id: String,
-        values: Vec<f32>,
-        metadata: Option<Value>,
-    ) -> Result<(), String> {
-        self.upsert(id, values, metadata)
-    }
-
-    fn delete(&mut self, id: &str) -> bool {
-        self.delete(id)
-    }
-
-    fn query(&self, query: &[f32], top_k: usize) -> Result<Vec<ScoredPoint>, String> {
-        self.query(query, top_k)
-    }
-
-    fn vector_count(&self) -> usize {
-        self.vector_count()
-    }
+    true
 }

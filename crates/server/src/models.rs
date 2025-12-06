@@ -44,7 +44,10 @@ pub struct UpsertResponse {
 pub struct QueryRequest {
     pub vector: Vec<f32>,
     pub top_k: usize,
+    #[serde(default)]
+    pub filter: Option<Value>, // NEW: optional metadata filter
 }
+
 
 #[derive(Serialize)]
 pub struct QueryMatch {
@@ -100,4 +103,12 @@ pub struct DeleteVectorResponse {
 #[derive(Serialize)]
 pub struct DeleteCollectionResponse {
     pub deleted: bool,
+}
+
+// ----------- snapshot ------------
+
+#[derive(Serialize)]
+pub struct SnapshotResponse {
+    pub success: bool,
+    pub message: String,
 }

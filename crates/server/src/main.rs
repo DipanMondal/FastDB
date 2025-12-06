@@ -14,14 +14,41 @@ mod auth;
 
 use crate::state::AppState;
 
+use std::collections::HashMap;
+
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_tracing();
 
-    // Load previous state from WAL
-    let collections = storage::load_collections_from_wal().unwrap_or_default();
-    tracing::info!("loaded {} collections from WAL", collections.len());
-    let app_state = AppState::with_collections(collections);
+    // Load previous state from WAL + snapshot
+    let mut collections = match storage::load_collections_from_snapshot() {
+		Ok(Some(map)) => {
+			tracing::info!(
+				"loaded collections from snapshot ({} tenants)",
+				map.len()
+			);
+			map
+		}
+		Ok(None) => {
+			tracing::info!("no snapshot found, starting from empty state");
+			HashMap::new()
+		}
+		Err(e) => {
+			tracing::error!("failed to load snapshot: {:?}", e);
+			HashMap::new()
+		}
+	};
+
+	
+	if let Err(e) = storage::replay_wal(&mut collections) {
+		tracing::error!("failed to replay WAL: {:?}", e);
+	} else {
+		tracing::info!("replayed WAL successfully");
+	}
+
+	let app_state = AppState::with_collections(collections);
+
 
     let app = Router::new()
         .route("/health", get(routes::health))
@@ -45,6 +72,10 @@ async fn main() -> anyhow::Result<()> {
             "/collections/:name/vectors/:id",
             delete(routes::delete_vector),
         )
+		.route(
+			"/admin/snapshot",
+			post(routes::create_snapshot),
+		)
         .route("/collections/:name/query", post(routes::query_vectors))
         .with_state(app_state);
 
